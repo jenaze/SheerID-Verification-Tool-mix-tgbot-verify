@@ -1,623 +1,708 @@
-"""PNG 教师证明生成模块 - Bolt.now / PSU"""
+"""PNG 教师证生成模块 - Multi-District & Multi-Document Type Support
+
+Supports:
+- Multiple document types: Employment Verification, Payroll Stub, Teacher Dashboard
+- Multiple school districts: Springfield, Jefferson, Oakland, Seattle, Boston, Chicago
+- Realistic screenshot effects: noise, blur, randomization
+"""
 import random
-from datetime import datetime
+import sys
+import os
+from datetime import datetime, timedelta
+from io import BytesIO
+
+# Add parent directory to path for utils imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.document_templates import (
+    DocumentType,
+    SCHOOL_DISTRICTS,
+    get_random_district,
+    generate_district_id,
+    generate_district_email,
+)
+from utils.image_effects import (
+    apply_all_effects,
+    randomize_viewport,
+    get_random_zoom,
+)
 
 
-def generate_psu_id():
-    """生成随机 PSU ID (9位数字)"""
-    return f"9{random.randint(10000000, 99999999)}"
-
-
-def generate_psu_email(first_name, last_name):
-    """
-    生成 PSU 邮箱
-    格式: firstName.lastName + 3-4位数字 @psu.edu
-    """
-    digit_count = random.choice([3, 4])
-    digits = ''.join([str(random.randint(0, 9)) for _ in range(digit_count)])
-    email = f"{first_name.lower()}.{last_name.lower()}{digits}@psu.edu"
-    return email
-
-
-_browser_context = None
-_page_pool = []
-
-
-def _get_browser_context():
-    """获取或创建浏览器上下文（单例模式）"""
-    global _browser_context
-    if _browser_context is None:
-        try:
-            from playwright.sync_api import sync_playwright
-            playwright = sync_playwright().start()
-            browser = playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-software-rasterizer',
-                    '--disable-extensions',
-                ]
-            )
-            _browser_context = browser.new_context(
-                viewport={'width': 1200, 'height': 1200},
-                device_scale_factor=2,
-            )
-        except ImportError:
-            raise Exception("需要安装 playwright: pip install playwright && playwright install chromium")
-    return _browser_context
-
-
-def _html_to_png(html_content: str, width: int = 1200, height: int = None) -> bytes:
-    """将 HTML 转换为 PNG 截图（优化版：复用浏览器实例）"""
-    try:
-        context = _get_browser_context()
-        page = context.new_page()
-
-        try:
-            # 直接设置 HTML 内容，使用 domcontentloaded 而非 networkidle（更快）
-            page.set_content(html_content, wait_until='domcontentloaded')
-
-            # 等待图片加载（如果有外部图片）
-            page.wait_for_load_state('load', timeout=3000)
-
-            # 自动计算高度
-            if height is None:
-                height = page.evaluate(
-                    "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)"
-                )
-
-            page.set_viewport_size({'width': width, 'height': height})
-
-            # 截图
-            screenshot_bytes = page.screenshot(type='png', full_page=True)
-            return screenshot_bytes
-        finally:
-            page.close()
-
-    except Exception as e:
-        raise Exception(f"生成图片失败: {str(e)}")
-
-
-def generate_teacher_card_html(first_name: str, last_name: str, psu_id: str) -> str:
-    """生成教师证件 HTML。"""
-    timestamp = int(datetime.now().timestamp())
+def generate_employment_verification_html(first_name: str, last_name: str, district_key: str, district_config: dict) -> str:
+    """Generate Employment Verification document"""
+    employee_id = generate_district_id(district_key)
     name = f"{first_name} {last_name}"
-    return f"""<!DOCTYPE html>
+    date = datetime.now().strftime('%m/%d/%Y %I:%M %p')
+    
+    primary_color = district_config['primary_color']
+    district_name = district_config['name']
+    system_name = district_config['system_name']
+    logo_text = district_config['logo_text']
+    
+    position_titles = [
+        'Faculty - Science Department (FTE 1.0)',
+        'Faculty - Mathematics Department (FTE 1.0)',
+        'Faculty - English Department (FTE 1.0)',
+        'Faculty - Social Studies (FTE 1.0)',
+        'Elementary Teacher (FTE 1.0)',
+        'Special Education Teacher (FTE 1.0)',
+    ]
+    position = random.choice(position_titles)
+    
+    schools = [
+        'North High School',
+        'Central High School',
+        'East Elementary School',
+        'West Middle School',
+        'Lincoln Elementary School',
+    ]
+    location = f"{district_config['short_name']} {random.choice(schools)}"
+    
+    hire_year = random.randint(2015, 2023)
+    
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PSU Faculty id+ Card</title>
+    <title>{system_name} - Employment Verification</title>
     <style>
         :root {{
-            --psu-blue: #1E407C;
-            --psu-light-blue: #96BEE6;
-            --text-dark: #333;
+            --primary-blue: {primary_color};
+            --border-gray: #dee2e6;
+            --bg-gray: #f8f9fa;
         }}
 
         body {{
-            background-color: #e0e0e0;
-            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #e9ecef;
             margin: 0;
-            flex-direction: column;
-            gap: 20px;
+            padding: 20px;
+            font-size: 14px;
+            color: #333;
         }}
 
-        .card-container {{
-            width: 320px;
-            height: 504px;
-            background-color: white;
-            border-radius: 15px;
-            position: relative;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }}
-
-        .card-header {{
-            width: 100%;
-            height: 90px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-top: 10px;
-        }}
-
-        .psu-brand {{
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }}
-
-        .lion-shield {{
-            width: 45px;
-            height: 50px;
-            background: var(--psu-blue);
-            clip-path: polygon(0 0, 100% 0, 100% 75%, 50% 100%, 0 75%);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }}
-        
-        .lion-shield::after {{
-            content: "";
-            width: 30px;
-            height: 30px;
+        .browser-mockup {{
+            max-width: 1000px;
+            margin: 0 auto;
             background: white;
-            mask: url('data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>');
-            -webkit-mask: url('data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>');
-        }}
-
-        .psu-text {{
-            display: flex;
-            flex-direction: column;
-        }}
-        .psu-text span:first-child {{
-            font-size: 20px;
-            font-weight: 900;
-            color: var(--psu-blue);
-            text-transform: uppercase;
-            line-height: 1;
-        }}
-        .psu-text span:last-child {{
-            font-size: 20px;
-            font-weight: 900;
-            color: var(--psu-blue);
-            text-transform: uppercase;
-            line-height: 1;
-        }}
-
-        .photo-area {{
-            width: 180px;
-            height: 230px;
-            background: #ddd;
-            border: 2px solid var(--psu-blue);
-            margin-top: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 4px;
             overflow: hidden;
         }}
-        
-        .photo-area img {{
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }}
 
-        .info-area {{
-            text-align: center;
-            margin-top: 15px;
-            flex-grow: 1;
-        }}
-
-        .name {{
-            font-size: 26px;
-            font-weight: bold;
-            color: black;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }}
-
-        .id-number {{
-            font-size: 16px;
-            font-family: "Courier New", monospace;
-            font-weight: bold;
-            color: #555;
-            letter-spacing: 1px;
-        }}
-
-        .footer-bar {{
-            width: 100%;
-            height: 50px;
-            background-color: var(--psu-blue);
+        .system-header {{
+            background: var(--primary-blue);
+            color: white;
+            padding: 15px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0 20px;
-            box-sizing: border-box;
         }}
 
-        .role-text {{
-            color: white;
-            font-weight: bold;
-            font-size: 18px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }}
-
-        .id-plus-logo {{
-            font-family: sans-serif;
-            font-weight: bold;
-            color: white;
-            font-size: 24px;
-            font-style: italic;
-        }}
-        .id-plus-logo span {{
-            color: #96BEE6;
-            font-style: normal;
-        }}
-
-        .hologram-overlay {{
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: linear-gradient(135deg, rgba(255,255,255,0) 40%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 60%);
-            pointer-events: none;
-            z-index: 10;
-        }}
-
-        @media print {{
-            body {{ background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-            .card-container {{ box-shadow: none; border: 1px solid #ccc; }}
-        }}
-    </style>
-</head>
-<body>
-
-<div class="card-container">
-    <div class="hologram-overlay"></div>
-
-    <div class="card-header">
-        <div class="psu-brand">
-            <div class="lion-shield"></div>
-            <div class="psu-text">
-                <span>Penn</span>
-                <span>State</span>
-            </div>
-        </div>
-    </div>
-
-    <div class="photo-area">
-        <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTgwIiBoZWlnaHQ9IjIzMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjIzMCIgZmlsbD0iI2RkZCIvPjxjaXJjbGUgY3g9IjkwIiBjeT0iNzAiIHI9IjMwIiBmaWxsPSIjYWFhIi8+PHBhdGggZD0iTTYwIDEzMCBROTAgMTEwIDEyMCAxMzAgTDEyMCAyMzAgTDYwIDIzMCBaIiBmaWxsPSIjYWFhIi8+PC9zdmc+" alt="Faculty Photo">
-    </div>
-
-    <div class="info-area">
-        <div class="name">{name}</div>
-        <div class="id-number">{psu_id}</div>
-    </div>
-
-    <div class="footer-bar">
-        <div class="role-text">Faculty/Staff</div>
-        <div class="id-plus-logo">id<span>+</span></div>
-    </div>
-</div>
-
-</body>
-</html>
-"""
-
-
-def generate_employment_letter_html(
-    first_name: str, last_name: str, title: str, dept: str
-) -> str:
-    """生成教师在职证明 HTML。"""
-    name = f"{first_name} {last_name}"
-    now = datetime.now()
-    date_str = now.strftime("%B %d, %Y")
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PSU Employment Verification</title>
-    <style>
-        body {{
-            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-        }}
-
-        .page {{
-            width: 8.5in;
-            min-height: 11in;
-            background: white;
-            padding: 1in;
-            box-sizing: border-box;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-            color: #333;
-            position: relative;
-        }}
-
-        .header {{
-            margin-bottom: 40px;
-            border-bottom: 1px solid #ccc;
-            padding-bottom: 20px;
-        }}
-
-        .logo-area {{
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }}
-
-        .psu-logo-mark {{
-            width: 50px;
-            height: 50px;
-            background-color: #1E407C;
-            mask: url('data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="45"/></svg>');
-            -webkit-mask: url('data:image/svg+xml;utf8,<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="45"/></svg>');
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-            font-size: 28px;
-            font-family: serif;
-            margin-right: 15px;
-        }}
-
-        .org-name {{
+        .district-name {{
             font-size: 18px;
             font-weight: bold;
-            color: #1E407C;
-            text-transform: uppercase;
+            display: flex;
+            align-items: center;
         }}
 
-        .hr-address {{
-            font-size: 11px;
+        .district-logo-placeholder {{
+            width: 30px; height: 30px; background: white; border-radius: 50%; margin-right: 10px;
+            display: flex; align-items: center; justify-content: center; color: var(--primary-blue); font-weight: 900;
+        }}
+
+        .user-nav {{ font-size: 13px; }}
+        .user-nav span {{ margin-left: 15px; cursor: pointer; opacity: 0.8; }}
+
+        .breadcrumb {{
+            background: #f0f2f5;
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border-gray);
             color: #666;
-            line-height: 1.4;
-            text-align: right;
-            position: absolute;
-            top: 1in;
-            right: 1in;
+            font-size: 12px;
         }}
 
-        .content {{
-            font-size: 11pt;
-            line-height: 1.6;
+        .main-content {{
+            padding: 30px;
         }}
 
-        .title {{
-            font-size: 16px;
+        .page-title {{
+            font-size: 22px;
+            margin-bottom: 25px;
+            color: #2c3e50;
+            border-bottom: 3px solid var(--primary-blue);
+            padding-bottom: 10px;
+            display: inline-block;
+        }}
+
+        .tabs {{
+            display: flex;
+            border-bottom: 1px solid var(--border-gray);
+            margin-bottom: 20px;
+        }}
+        .tab {{
+            padding: 10px 20px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            color: var(--primary-blue);
+        }}
+        .tab.active {{
+            border: 1px solid var(--border-gray);
+            border-bottom-color: white;
+            background: white;
+            color: #333;
             font-weight: bold;
-            text-align: center;
-            margin: 30px 0;
-            text-transform: uppercase;
-            text-decoration: underline;
+            margin-bottom: -1px;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
         }}
 
-        .data-table {{
+        .data-panel {{
+            border: 1px solid var(--border-gray);
+            border-radius: 4px;
+            margin-bottom: 25px;
+        }}
+        .panel-header {{
+            background: var(--bg-gray);
+            padding: 10px 15px;
+            font-weight: bold;
+            border-bottom: 1px solid var(--border-gray);
+        }}
+        .panel-body {{ padding: 20px; }}
+
+        .info-table {{
             width: 100%;
             border-collapse: collapse;
-            margin: 30px 0;
-            font-size: 11pt;
         }}
-
-        .data-table td {{
-            padding: 8px 5px;
+        .info-table th, .info-table td {{
+            padding: 12px;
+            text-align: left;
             border-bottom: 1px solid #eee;
         }}
-
-        .data-label {{
-            font-weight: bold;
-            width: 40%;
-            color: #555;
+        .info-table th {{
+            width: 30%;
+            color: #666;
+            font-weight: normal;
+            background-color: #fafafa;
         }}
-
-        .data-value {{
+        .info-table td {{
             font-weight: 600;
             color: #000;
         }}
 
-        .footer {{
-            position: absolute;
-            bottom: 0.75in;
-            left: 1in;
-            right: 1in;
-            font-size: 9px;
-            color: #888;
-            text-align: center;
-            border-top: 1px solid #eee;
-            padding-top: 10px;
+        .status-active {{
+            background-color: #d4edda;
+            color: #155724;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+            display: inline-block;
         }}
 
-        @media print {{
-            body {{ background: white; padding: 0; }}
-            .page {{ box-shadow: none; margin: 0; width: 100%; height: auto; }}
+        .system-footer {{
+            padding: 15px 30px;
+            background: #f8f9fa;
+            border-top: 1px solid var(--border-gray);
+            font-size: 11px;
+            color: #888;
+            display: flex;
+            justify-content: space-between;
         }}
     </style>
 </head>
 <body>
 
-<div class="page">
-    <div class="header">
-        <div class="logo-area">
-            <div class="psu-logo-mark">P</div>
-            <div class="org-name">The Pennsylvania State University</div>
+<div class="browser-mockup">
+    <div class="system-header">
+        <div class="district-name">
+            <div class="district-logo-placeholder">{logo_text}</div>
+            {district_name} - {system_name}
         </div>
-        <div class="hr-address">
-            <strong>Human Resources Shared Services</strong><br>
-            The 331 Building<br>
-            University Park, PA 16802<br>
-            Phone: (814) 865-1473
+        <div class="user-nav">
+            Welcome, <span>{name}</span> | My Account | Sign Out
         </div>
     </div>
 
-    <div class="content">
-        <div style="margin-bottom: 20px;">{date_str}</div>
-
-        <div style="margin-bottom: 20px;">
-            <strong>To Whom It May Concern:</strong>
-        </div>
-
-        <p>
-            This letter is to verify the employment of the individual listed below with The Pennsylvania State University. This information is generated from the University's official Human Resources records system.
-        </p>
-
-        <div class="title">Certificate of Employment</div>
-
-        <table class="data-table">
-            <tr>
-                <td class="data-label">Employee Name:</td>
-                <td class="data-value">{name}</td>
-            </tr>
-            <tr>
-                <td class="data-label">Job Profile / Title:</td>
-                <td class="data-value">{title}</td>
-            </tr>
-            <tr>
-                <td class="data-label">Primary Department:</td>
-                <td class="data-value">{dept}</td>
-            </tr>
-            <tr>
-                <td class="data-label">Employment Status:</td>
-                <td class="data-value" style="color:green;">Active</td>
-            </tr>
-            <tr>
-                <td class="data-label">Continuous Service Date:</td>
-                <td class="data-value">August 15, 2018</td>
-            </tr>
-            <tr>
-                <td class="data-label">Full-Time Equivalent (FTE):</td>
-                <td class="data-value">100.0%</td>
-            </tr>
-            <tr>
-                <td class="data-label">Pay Frequency:</td>
-                <td class="data-value">Monthly</td>
-            </tr>
-        </table>
-
-        <p>
-            The employee listed above is currently an active member of the faculty/staff at Penn State. 
-            Should you require further information regarding salary or detailed compensation, authorized requests may be submitted directly to PSU HR Shared Services.
-        </p>
-
-        <div style="margin-top: 50px;">
-            Sincerely,
-        </div>
-        <div style="margin-top: 10px;">
-            <strong>PSU Human Resources</strong><br>
-            Records Management Team
-        </div>
+    <div class="breadcrumb">
+        Home > Employee Self Service > Employment > Current Assignment Information
     </div>
 
-    <div class="footer">
-        Generated by Workday for The Pennsylvania State University | Report ID: WD-VER-99281 | {date_str}<br>
-        This document is valid for 90 days from the date of issuance.
+    <div class="main-content">
+        <h1 class="page-title">Current Job Summary & Verification</h1>
+
+        <div class="tabs">
+            <div class="tab active">Assignment Details</div>
+            <div class="tab">Compensation History</div>
+            <div class="tab">Certifications</div>
+        </div>
+
+        <div class="data-panel">
+            <div class="panel-header">Employee Information</div>
+            <div class="panel-body">
+                <table class="info-table">
+                    <tr>
+                        <th>Employee Name:</th>
+                        <td style="font-size: 16px;">{name}</td>
+                    </tr>
+                    <tr>
+                        <th>Employee ID:</th>
+                        <td>{employee_id}</td>
+                    </tr>
+                    <tr>
+                        <th>Current Status:</th>
+                        <td><span class="status-active">Active / Active Payroll</span></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="data-panel">
+            <div class="panel-header">Primary Assignment Details (Academic Year 2025-2026)</div>
+            <div class="panel-body">
+                <table class="info-table">
+                    <tr>
+                        <th>Primary Location:</th>
+                        <td>{location}</td>
+                    </tr>
+                    <tr>
+                        <th>Position / Job Title:</th>
+                        <td>{position}</td>
+                    </tr>
+                    <tr>
+                        <th>Employee Type:</th>
+                        <td>Certified Faculty / Staff</td>
+                    </tr>
+                    <tr>
+                        <th>Hire Date:</th>
+                        <td>August 15, {hire_year}</td>
+                    </tr>
+                    <tr>
+                        <th>Assignment Dates:</th>
+                        <td>August 20, 2025 - June 10, 2026</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="system-footer">
+        <div>System Report Generated: <span>{date}</span></div>
+        <div>Environment: PROD | Database: HR_SYS | Version: 12.4.0.88</div>
     </div>
 </div>
 
 </body>
 </html>
 """
+    
+    return html
 
 
-def _html_to_png_batch(html_list: list[tuple[str, int, int]]) -> list[bytes]:
+def generate_payroll_stub_html(first_name: str, last_name: str, district_key: str, district_config: dict) -> str:
+    """Generate Payroll Stub document"""
+    employee_id = generate_district_id(district_key)
+    name = f"{first_name} {last_name}"
+    
+    # Generate stub for recent pay period
+    pay_date = datetime.now() - timedelta(days=random.randint(1, 14))
+    pay_period_start = pay_date - timedelta(days=14)
+    pay_period_end = pay_date - timedelta(days=1)
+    
+    primary_color = district_config['primary_color']
+    district_name = district_config['name']
+    
+    # Generate salary numbers
+    gross_pay = random.uniform(3500, 5500)
+    federal_tax = gross_pay * random.uniform(0.15, 0.22)
+    state_tax = gross_pay * random.uniform(0.05, 0.08)
+    social_security = gross_pay * 0.062
+    medicare = gross_pay * 0.0145
+    retirement = gross_pay * random.uniform(0.06, 0.08)
+    
+    total_deductions = federal_tax + state_tax + social_security + medicare + retirement
+    net_pay = gross_pay - total_deductions
+    
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Payroll Statement</title>
+    <style>
+        body {{
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }}
+        
+        .payslip-container {{
+            width: 850px;
+            background: white;
+            margin: 0 auto;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 30px;
+        }}
+        
+        .header {{
+            border-bottom: 3px double {primary_color};
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }}
+        
+        .district-title {{
+            font-size: 20px;
+            font-weight: bold;
+            color: {primary_color};
+            margin-bottom: 5px;
+        }}
+        
+        .slip-title {{
+            font-size: 16px;
+            text-align: center;
+            margin: 15px 0;
+            font-weight: bold;
+        }}
+        
+        .info-section {{
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }}
+        
+        .info-block {{
+            flex: 1;
+        }}
+        
+        .info-row {{
+            display: flex;
+            margin: 5px 0;
+        }}
+        
+        .info-label {{
+            width: 150px;
+            font-weight: bold;  
+        }}
+        
+        .pay-table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }}
+        
+        .pay-table th {{
+            background: {primary_color};
+            color: white;
+            padding: 8px;
+            text-align: left;
+            font-size: 13px;
+        }}
+        
+        .pay-table td {{
+            padding: 8px;
+            border-bottom: 1px dashed #ccc;
+        }}
+        
+        .total-row {{
+            font-weight: bold;
+            background: #f5f5f5;
+        }}
+        
+        .net-pay {{
+            font-size: 18px;
+            font-weight: bold;
+            text-align: right;
+            padding: 15px;
+            background: #e8f5e9;
+            border: 2px solid #4caf50;
+            margin: 20px 0;
+        }}
+        
+        .footer {{
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid #ccc;
+            font-size: 10px;
+            text-align: center;
+            color: #666;
+        }}
+    </style>
+</head>
+<body>
+
+<div class="payslip-container">
+    <div class="header">
+        <div class="district-title">{district_name}</div>
+        <div>Payroll Department</div>
+    </div>
+    
+    <div class="slip-title">EARNINGS STATEMENT</div>
+    
+    <div class="info-section">
+        <div class="info-block">
+            <div class="info-row">
+                <div class="info-label">Employee Name:</div>
+                <div>{name}</div>
+            </div>
+            <div class="info-row">
+                <div class="info-label">Employee ID:</div>
+                <div>{employee_id}</div>
+            </div>
+            <div class="info-row">
+                <div class="info-label">Pay Period:</div>
+                <div>{pay_period_start.strftime('%m/%d/%Y')} - {pay_period_end.strftime('%m/%d/%Y')}</div>
+            </div>
+        </div>
+        <div class="info-block">
+            <div class="info-row">
+                <div class="info-label">Pay Date:</div>
+                <div>{pay_date.strftime('%m/%d/%Y')}</div>
+            </div>
+            <div class="info-row">
+                <div class="info-label">Status:</div>
+                <div>Full-time Certified</div>
+            </div>
+        </div>
+    </div>
+    
+    <table class="pay-table">
+        <thead>
+            <tr>
+                <th>Earnings</th>
+                <th style="text-align: right;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Regular Salary</td>
+                <td style="text-align: right;">${gross_pay:,.2f}</td>
+            </tr>
+            <tr class="total-row">
+                <td>Gross Pay</td>
+                <td style="text-align: right;">${gross_pay:,.2f}</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <table class="pay-table">
+        <thead>
+            <tr>
+                <th>Deductions</th>
+                <th style="text-align: right;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Federal Income Tax</td>
+                <td style="text-align: right;">${federal_tax:,.2f}</td>
+            </tr>
+            <tr>
+                <td>State Income Tax</td>
+                <td style="text-align: right;">${state_tax:,.2f}</td>
+            </tr>
+            <tr>
+                <td>Social Security</td>
+                <td style="text-align: right;">${social_security:,.2f}</td>
+            </tr>
+            <tr>
+                <td>Medicare</td>
+                <td style="text-align: right;">${medicare:,.2f}</td>
+            </tr>
+            <tr>
+                <td>Retirement Contribution</td>
+                <td style="text-align: right;">${retirement:,.2f}</td>
+            </tr>
+            <tr class="total-row">
+                <td>Total Deductions</td>
+                <td style="text-align: right;">${total_deductions:,.2f}</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <div class="net-pay">
+        NET PAY: ${net_pay:,.2f}
+    </div>
+    
+    <div class="footer">
+        <p>*** This is a computer-generated statement and does not require a signature ***</p>
+        <p>{district_name} - Confidential Payroll Document</p>
+        <p>Document ID: PAY-{random.randint(100000, 999999)}</p>
+    </div>
+</div>
+
+</body>
+</html>
+"""
+    
+    return html
+
+
+def generate_teacher_dashboard_html(first_name: str, last_name: str, district_key: str, district_config: dict) -> str:
+    """Generate Teacher Dashboard view (simplified employment verification)"""
+    # This is basically the same as employment verification
+    return generate_employment_verification_html(first_name, last_name, district_key, district_config)
+
+
+def generate_html(first_name: str, last_name: str, doc_type: DocumentType = None, district_key: str = None) -> str:
     """
-    批量并发生成多张 PNG（性能优化版）
-
+    Generate HTML for teacher verification document
+    
     Args:
-        html_list: [(html_content, width, height), ...]
-
+        first_name: Teacher first name
+        last_name: Teacher last name
+        doc_type: Document type (if None, randomly selected)
+        district_key: School district key (if None, randomly selected)
+        
     Returns:
-        list[bytes]: PNG 数据列表
+        HTML string
     """
-    import asyncio
-    from playwright.async_api import async_playwright
+    # Randomly select document type if not provided
+    if doc_type is None:
+        doc_type = random.choice([
+            DocumentType.EMPLOYMENT_VERIFICATION,
+            DocumentType.EMPLOYMENT_VERIFICATION,  # Give employment verification higher weight
+            DocumentType.TEACHER_DASHBOARD,
+            DocumentType.PAYROLL_STUB,
+        ])
+    
+    # Randomly select district if not provided
+    if district_key is None:
+        district_key, district_config = get_random_district()
+    else:
+        district_config = SCHOOL_DISTRICTS[district_key]
+    
+    # Generate appropriate HTML based on document type
+    if doc_type in [DocumentType.EMPLOYMENT_VERIFICATION, DocumentType.TEACHER_DASHBOARD]:
+        return generate_employment_verification_html(first_name, last_name, district_key, district_config)
+    elif doc_type == DocumentType.PAYROLL_STUB:
+        return generate_payroll_stub_html(first_name, last_name, district_key, district_config)
+    else:
+        # Default to employment verification
+        return generate_employment_verification_html(first_name, last_name, district_key, district_config)
 
-    async def render_single(html_content: str, width: int, height: int):
-        """异步渲染单张图片"""
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-software-rasterizer',
-                    '--disable-extensions',
-                ]
-            )
-            context = await browser.new_context(
-                viewport={'width': width, 'height': height},
-                device_scale_factor=2,
-            )
-            page = await context.new_page()
 
+def generate_teacher_png(first_name: str, last_name: str, doc_type: DocumentType = None) -> bytes:
+    """
+    Generate teacher verification document PNG with realistic effects
+    
+    Args:
+        first_name: Teacher first name
+        last_name: Teacher last name
+        doc_type: Document type (if None, randomly selected)
+        
+    Returns:
+        PNG image bytes
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+        
+        # Generate HTML
+        html_content = generate_html(first_name, last_name, doc_type=doc_type)
+        
+        # Get randomized viewport and zoom
+        viewport = randomize_viewport()
+        zoom = get_random_zoom()
+        
+        # Use Playwright to screenshot
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(viewport={'width': viewport[0], 'height': viewport[1]})
+            
+            page.set_content(html_content, wait_until='load')
+            page.evaluate(f'document.body.style.zoom = "{zoom}"')
+            page.wait_for_timeout(500)
+            
+            # Try to screenshot the .browser-mockup element, fallback to full page
             try:
-                await page.set_content(html_content, wait_until='domcontentloaded')
-                await page.wait_for_load_state('load', timeout=3000)
+                card = page.locator('.browser-mockup, .payslip-container')
+                png_bytes = card.screenshot(type='png')
+            except:
+                png_bytes = page.screenshot(type='png', full_page=True)
+            
+            browser.close()
+        
+        # Apply realistic screenshot effects
+        png_bytes = apply_all_effects(
+            png_bytes,
+            noise_intensity=random.uniform(0.008, 0.015),
+            blur_radius=random.uniform(0.25, 0.4),
+            brightness_variation=True
+        )
+        
+        return png_bytes
+        
+    except ImportError:
+        raise RuntimeError("需要安装 playwright，请执行 `pip install playwright` 然后 `playwright install chromium`")
+    except Exception as e:
+        raise Exception(f"生成图片失败: {str(e)}")
 
-                if height is None:
-                    height = await page.evaluate(
-                        "Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)"
-                    )
-                    await page.set_viewport_size({'width': width, 'height': height})
 
-                screenshot_bytes = await page.screenshot(type='png', full_page=True)
-                return screenshot_bytes
-            finally:
-                await browser.close()
-
-    async def render_all():
-        """并发渲染所有图片"""
-        tasks = [render_single(html, w, h) for html, w, h in html_list]
-        return await asyncio.gather(*tasks)
-
-    return asyncio.run(render_all())
+# Backward compatibility
+def generate_teacher_image(first_name: str, last_name: str) -> bytes:
+    """Backward compatibility: Generate teacher verification image"""
+    return generate_teacher_png(first_name, last_name)
 
 
-def generate_images(first_name: str, last_name: str, school_id: str = '2565'):
+def generate_teacher_pdf(first_name: str, last_name: str) -> bytes:
+    """Deprecated: PDF generation removed, returns PNG instead"""
+    return generate_teacher_png(first_name, last_name)
+
+
+# ===========================================================================
+# BOLTNEW BACKWARD COMPATIBILITY LAYER
+# ===========================================================================
+
+def generate_psu_email(first_name, last_name):
+    """Backward compatibility: Generate email address for teacher"""
+    district_key, _ = get_random_district()
+    return generate_district_email(first_name, last_name, district_key)
+
+
+def generate_images(first_name, last_name, school_id=None):
     """
-    生成两张 PNG：教师卡片 + 在职证明（并发优化版）
-
-    Args:
-        first_name: 名
-        last_name: 姓
-        school_id: 学校 ID（保留接口一致）
-
-    Returns:
-        list[dict]: [{"file_name": str, "data": bytes}]
+    Backward compatibility: Generate teacher images in old format
+    
+    Returns list of dicts with 'file_name' and 'data' keys for Boltnew compatibility
     """
-    psu_id = generate_psu_id()
-    titles = [
-        "Associate Professor",
-        "Assistant Professor",
-        "Teaching Professor",
-        "Instructor",
-        "Adjunct Faculty",
-    ]
-    departments = [
-        "College of Engineering",
-        "Department of Computer Science and Engineering",
-        "Eberly College of Science",
-        "College of Education",
-        "Smeal College of Business",
-    ]
-    title = random.choice(titles)
-    dept = random.choice(departments)
-
-    card_html = generate_teacher_card_html(first_name, last_name, psu_id)
-    letter_html = generate_employment_letter_html(first_name, last_name, title, dept)
-
-    # 并发生成两张图片
-    html_list = [
-        (card_html, 700, 1100),
-        (letter_html, 1300, 1600),
-    ]
-
-    results = _html_to_png_batch(html_list)
-    card_png, letter_png = results
-
+    png_data = generate_teacher_png(first_name, last_name)
     return [
-        {"file_name": "teacher_id.png", "data": card_png},
-        {"file_name": "employment_letter.png", "data": letter_png},
+        {
+            'file_name': 'teacher_verification.png',
+            'data': png_data
+        }
     ]
 
 
 if __name__ == '__main__':
-    # 简单测试
-    assets = generate_images("John", "Smith")
-    for asset in assets:
-        with open(asset["file_name"], "wb") as f:
-            f.write(asset["data"])
-        print(f"Generated {asset['file_name']} ({len(asset['data'])} bytes)")
+    # Test code
+    import io
+    
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    
+    print("测试多学区、多文档类型教师证生成...")
+    
+    first_name = "Sarah"
+    last_name = "Johnson"
+    
+    print(f"姓名: {first_name} {last_name}\n")
+    
+    doc_types = [
+        DocumentType.EMPLOYMENT_VERIFICATION,
+        DocumentType.PAYROLL_STUB,
+    ]
+    
+    for doc_type in doc_types:
+        try:
+            print(f"生成 {doc_type.value}...")
+            img_data = generate_teacher_png(first_name, last_name, doc_type=doc_type)
+            
+            filename = f'test_teacher_{doc_type.value}.png'
+            with open(filename, 'wb') as f:
+                f.write(img_data)
+            
+            print(f"✓ 图片生成成功! 大小: {len(img_data)} bytes")
+            print(f"✓ 已保存为 {filename}\n")
+            
+        except Exception as e:
+            print(f"✗ 错误: {e}\n")

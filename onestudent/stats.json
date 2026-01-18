@@ -1,0 +1,43 @@
+{
+  "total": 11,
+  "success": 1,
+  "failed": 10,
+  "orgs": {
+    "Boston University": {
+      "success": 0,
+      "failed": 1
+    },
+    "University of California, Irvine": {
+      "success": 0,
+      "failed": 1
+    },
+    "Ohio State University": {
+      "success": 0,
+      "failed": 1
+    },
+    "University of Minnesota Twin Cities": {
+      "success": 0,
+      "failed": 1
+    },
+    "University of California, Berkeley": {
+      "success": 0,
+      "failed": 2
+    },
+    "University of California, Los Angeles": {
+      "success": 0,
+      "failed": 2
+    },
+    "University of Washington": {
+      "success": 0,
+      "failed": 1
+    },
+    "Stanford University": {
+      "success": 0,
+      "failed": 1
+    },
+    "Princeton University": {
+      "success": 1,
+      "failed": 0
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "total": 15,
+  "success": 9,
+  "failed": 6,
+  "orgs": {
+    "University of Michigan": {
+      "success": 0,
+      "failed": 1
+    },
+    "Purdue University": {
+      "success": 0,
+      "failed": 1
+    },
+    "University of North Carolina at Chapel Hill": {
+      "success": 0,
+      "failed": 1
+    },
+    "Arizona State University": {
+      "success": 1,
+      "failed": 0
+    },
+    "University of British Columbia": {
+      "success": 1,
+      "failed": 0
+    },
+    "University of California, Los Angeles": {
+      "success": 1,
+      "failed": 1
+    },
+    "University of Washington": {
+      "success": 1,
+      "failed": 0
+    },
+    "Columbia University": {
+      "success": 2,
+      "failed": 1
+    },
+    "University of Southern California": {
+      "success": 1,
+      "failed": 0
+    },
+    "University of Pennsylvania": {
+      "success": 1,
+      "failed": 0
+    },
+    "New York University": {
+      "success": 1,
+      "failed": 0
+    },
+    "Carnegie Mellon University": {
+      "success": 0,
+      "failed": 1
+    }
+  }
+}

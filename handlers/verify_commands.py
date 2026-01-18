@@ -15,6 +15,7 @@ from k12.sheerid_verifier import SheerIDVerifier as K12Verifier
 from spotify.sheerid_verifier import SheerIDVerifier as SpotifyVerifier
 from youtube.sheerid_verifier import SheerIDVerifier as YouTubeVerifier
 from Boltnew.sheerid_verifier import SheerIDVerifier as BoltnewVerifier
+from onestudent.sheerid_verifier import GeminiStudentVerifier
 from utils.messages import get_insufficient_balance_message, get_verify_usage_message
 
 # 尝试导入并发控制，如果失败则使用空实现
@@ -229,7 +230,7 @@ async def verify3_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db
 
     try:
         async with semaphore:
-        verifier = SpotifyVerifier(verification_id)
+            verifier = SpotifyVerifier(verification_id)
             result = await asyncio.to_thread(verifier.verify)
 
         db.add_verification(
@@ -535,6 +536,98 @@ async def verify5_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db
             )
     except Exception as e:
         logger.error("YouTube 验证过程出错: %s", e)
+        db.add_balance(user_id, VERIFY_COST)
+        await processing_msg.edit_text(
+            f"❌ 处理过程中出现错误：{str(e)}\n\n"
+            f"已退回 {VERIFY_COST} 积分"
+        )
+
+
+async def verify6_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
+    """处理 /verify6 命令 - Gemini One Student (45+ Universities)"""
+    user_id = update.effective_user.id
+
+    if db.is_user_blocked(user_id):
+        await update.message.reply_text("您已被拉黑，无法使用此功能。")
+        return
+
+    if not db.user_exists(user_id):
+        await update.message.reply_text("请先使用 /start 注册。")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            get_verify_usage_message("/verify6", "Gemini One Student (Advanced)")
+        )
+        return
+
+    url = context.args[0]
+    user = db.get_user(user_id)
+    if user["balance"] < VERIFY_COST:
+        await update.message.reply_text(
+            get_insufficient_balance_message(user["balance"])
+        )
+        return
+
+    # 解析 verificationId
+    verification_id = GeminiStudentVerifier.parse_verification_id(url)
+    if not verification_id:
+        await update.message.reply_text("无效的 SheerID 链接，请检查后重试。")
+        return
+
+    if not db.deduct_balance(user_id, VERIFY_COST):
+        await update.message.reply_text("扣除积分失败，请稍后重试。")
+        return
+
+    processing_msg = await update.message.reply_text(
+        f"🎓 开始处理 Gemini One Student 认证...\n"
+        f"已扣除 {VERIFY_COST} 积分\n\n"
+        "📝 正在生成学生信息...\n"
+        "🏫 正在选择大学（45+所）...\n"
+        "📄 正在生成学生文档...\n"
+        "📤 正在提交到 SheerID..."
+    )
+
+    # 使用信号量控制并发
+    semaphore = get_verification_semaphore("gemini_student")
+
+    try:
+        async with semaphore:
+            verifier = GeminiStudentVerifier(verification_id)
+            result = await verifier.verify()
+
+        db.add_verification(
+            user_id,
+            "gemini_student",
+            url,
+            "success" if result["success"] else "failed",
+            str(result),
+        )
+
+        if result["success"]:
+            result_msg = "✅ Gemini One Student 认证成功！\n\n"
+            result_msg += f"👤 学生: {result.get('student', 'N/A')}\n"
+            result_msg += f"🆔 学号: {result.get('student_id', 'N/A')}\n"
+            result_msg += f"📧 邮箱: {result.get('email', 'N/A')}\n"
+            result_msg += f"🏫 学校: {result.get('school', 'N/A')}\n"
+            result_msg += f"📄 文档: {result.get('doc_count', 0)} 份 ({result.get('doc_types', 'N/A')})\n\n"
+            
+            if result.get("pending"):
+                result_msg += "✨ 文档已提交，等待 SheerID 审核\n"
+                result_msg += "⏱️ 预计审核时间：几分钟到1小时\n\n"
+            
+            if result.get("redirect_url"):
+                result_msg += f"🔗 跳转链接：\n{result['redirect_url']}"
+            
+            await processing_msg.edit_text(result_msg)
+        else:
+            db.add_balance(user_id, VERIFY_COST)
+            await processing_msg.edit_text(
+                f"❌ 认证失败：{result.get('message', '未知错误')}\n\n"
+                f"已退回 {VERIFY_COST} 积分"
+            )
+    except Exception as e:
+        logger.error("Gemini Student 验证过程出错: %s", e)
         db.add_balance(user_id, VERIFY_COST)
         await processing_msg.edit_text(
             f"❌ 处理过程中出现错误：{str(e)}\n\n"

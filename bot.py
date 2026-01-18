@@ -2,7 +2,9 @@
 import logging
 from functools import partial
 
+import httpx
 from telegram.ext import Application, CommandHandler
+from telegram.request import HTTPXRequest
 
 from config import BOT_TOKEN
 from database_mysql import Database
@@ -20,6 +22,7 @@ from handlers.verify_commands import (
     verify2_command,
     verify3_command,
     verify4_command,
+    verify6_command,
     getV4Code_command,
 )
 from handlers.admin_commands import (
@@ -50,11 +53,22 @@ def main():
     # 初始化数据库
     db = Database()
 
-    # 创建应用 - 启用并发处理
+    # 配置更稳定的 HTTP 请求设置
+    # 增加超时时间和连接池大小，减少网络波动导致的错误
+    request = HTTPXRequest(
+        connection_pool_size=100,  # 增大连接池
+        read_timeout=30.0,         # 读取超时 30 秒
+        write_timeout=30.0,        # 写入超时 30 秒
+        connect_timeout=30.0,      # 连接超时 30 秒
+        pool_timeout=10.0,         # 连接池超时 10 秒
+    )
+
+    # 创建应用 - 启用并发处理，使用自定义请求配置
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .concurrent_updates(True)  # 🔥 关键：启用并发处理多个命令
+        .request(request)          # 🔥 使用自定义请求配置
+        .concurrent_updates(True)  # 🔥 启用并发处理多个命令
         .build()
     )
 
@@ -72,6 +86,7 @@ def main():
     application.add_handler(CommandHandler("verify2", partial(verify2_command, db=db)))
     application.add_handler(CommandHandler("verify3", partial(verify3_command, db=db)))
     application.add_handler(CommandHandler("verify4", partial(verify4_command, db=db)))
+    application.add_handler(CommandHandler("verify6", partial(verify6_command, db=db)))
     application.add_handler(CommandHandler("getV4Code", partial(getV4Code_command, db=db)))
 
     # 注册管理员命令

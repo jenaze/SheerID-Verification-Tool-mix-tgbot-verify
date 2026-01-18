@@ -2,6 +2,8 @@
 import re
 import random
 import logging
+import hashlib
+import time
 import httpx
 from typing import Dict, Optional, Tuple
 
@@ -18,22 +20,42 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def generate_realistic_fingerprint() -> str:
+    """Generate realistic browser fingerprint to avoid fraud detection (Windows)"""
+    # Realistic screen resolutions
+    resolutions = ["1920x1080", "2560x1440"]
+    # US timezones (offset from UTC)
+    timezones = [-8, -7, -6, -5, -4]  # PST, MST, CST, EST, AST
+    # User agent components
+    chrome_versions = ["120", "121", "122", "123", "124", "125"]
+    
+    components = [
+        str(int(time.time() * 1000)),  # Timestamp
+        str(random.random()),           # Random seed
+        random.choice(resolutions),     # Screen resolution
+        str(random.choice(timezones)),  # Timezone offset
+        "en-US",                         # Language
+        "Win32",                         # Platform - Fixed to Windows to match UA
+        str(random.randint(4, 16)),     # CPU cores
+        random.choice(chrome_versions), # Browser version hint
+    ]
+    return hashlib.md5("|".join(components).encode()).hexdigest()
+
+
 class SheerIDVerifier:
     """SheerID 学生身份验证器"""
 
     def __init__(self, verification_id: str):
         self.verification_id = verification_id
-        self.device_fingerprint = self._generate_device_fingerprint()
+        self.device_fingerprint = generate_realistic_fingerprint()
+        # Random Chrome version for realistic User-Agent
+        chrome_ver = random.choice(["120.0.6099.109", "121.0.6167.85", "122.0.6261.94", "123.0.6312.58", "124.0.6367.78"])
+        self.user_agent = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_ver} Safari/537.36"
         self.http_client = httpx.Client(timeout=30.0)
 
     def __del__(self):
         if hasattr(self, "http_client"):
             self.http_client.close()
-
-    @staticmethod
-    def _generate_device_fingerprint() -> str:
-        chars = '0123456789abcdef'
-        return ''.join(random.choice(chars) for _ in range(32))
 
     @staticmethod
     def normalize_url(url: str) -> str:
@@ -42,7 +64,7 @@ class SheerIDVerifier:
 
     @staticmethod
     def parse_verification_id(url: str) -> Optional[str]:
-        match = re.search(r"verificationId=([a-f0-9]+)", url, re.IGNORECASE)
+        match = re.search(r"verificationId=([a-f0-9]{24})", url, re.IGNORECASE)
         if match:
             return match.group(1)
         return None
@@ -50,9 +72,15 @@ class SheerIDVerifier:
     def _sheerid_request(
         self, method: str, url: str, body: Optional[Dict] = None
     ) -> Tuple[Dict, int]:
-        """发送 SheerID API 请求"""
+        """发送 SheerID API 请求 - 使用浏览器风格的请求头"""
         headers = {
             "Content-Type": "application/json",
+            "User-Agent": self.user_agent,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Origin": "https://services.sheerid.com",
+            "Referer": f"https://services.sheerid.com/verify/{config.PROGRAM_ID}/",
         }
 
         try:
@@ -125,6 +153,7 @@ class SheerIDVerifier:
                 "birthDate": birth_date,
                 "email": email,
                 "phoneNumber": "",
+                "country": "US",
                 "organization": {
                     "id": int(school_id),
                     "idExtended": school["idExtended"],
