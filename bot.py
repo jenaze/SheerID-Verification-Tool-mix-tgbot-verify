@@ -3,7 +3,7 @@ import logging
 from functools import partial
 
 import httpx
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from config import BOT_TOKEN
@@ -16,6 +16,9 @@ from handlers.user_commands import (
     checkin_command,
     invite_command,
     use_command,
+    language_command,
+    language_callback,
+    handle_message,
 )
 from handlers.verify_commands import (
     verify_command,
@@ -80,6 +83,13 @@ def main():
     application.add_handler(CommandHandler("qd", partial(checkin_command, db=db)))
     application.add_handler(CommandHandler("invite", partial(invite_command, db=db)))
     application.add_handler(CommandHandler("use", partial(use_command, db=db)))
+    application.add_handler(CommandHandler("language", partial(language_command, db=db)))
+
+    # 注册消息处理器（菜单点击）
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, partial(handle_message, db=db)))
+
+    # 注册回调查询处理器（语言选择）
+    application.add_handler(CallbackQueryHandler(partial(language_callback, db=db)))
 
     # 注册验证命令
     application.add_handler(CommandHandler("verify", partial(verify_command, db=db)))
