@@ -2,8 +2,8 @@
 import logging
 from typing import Optional
 
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import ContextTypes, CallbackQueryHandler
 
 from config import ADMIN_USER_ID
 from database_mysql import Database
@@ -13,8 +13,28 @@ from utils.messages import (
     get_about_message,
     get_help_message,
 )
+from utils.i18n import get_text, LANGUAGES
 
 logger = logging.getLogger(__name__)
+
+
+def get_main_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
+    """获取主菜单键盘"""
+    keyboard = [
+        [
+            KeyboardButton(get_text("menu_verify", lang)),
+            KeyboardButton(get_text("menu_balance", lang))
+        ],
+        [
+            KeyboardButton(get_text("menu_checkin", lang)),
+            KeyboardButton(get_text("menu_invite", lang))
+        ],
+        [
+            KeyboardButton(get_text("menu_language", lang)),
+            KeyboardButton(get_text("menu_help", lang))
+        ]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
@@ -27,12 +47,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: 
     username = user.username or ""
     full_name = user.full_name or ""
 
-    # 已初始化直接返回
+    # 获取语言，如果用户未注册则默认为en
+    lang = "en"
     if db.user_exists(user_id):
+        lang = db.get_user_language(user_id)
+        msg = get_text("welcome_back", lang, full_name=full_name)
         await update.message.reply_text(
-            f"欢迎回来，{full_name}！\n"
-            "您已经初始化过了。\n"
-            "发送 /help 查看可用命令。"
+            msg,
+            reply_markup=get_main_menu_keyboard(lang)
         )
         return
 
@@ -48,10 +70,86 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: 
 
     # 创建用户
     if db.create_user(user_id, username, full_name, invited_by):
-        welcome_msg = get_welcome_message(full_name, bool(invited_by))
-        await update.message.reply_text(welcome_msg)
+        welcome_msg = get_welcome_message(full_name, bool(invited_by), lang)
+
+        # 提示选择语言
+        keyboard = [
+            [
+                InlineKeyboardButton("English", callback_data="lang_en"),
+                InlineKeyboardButton("简体中文", callback_data="lang_zh")
+            ],
+            [
+                InlineKeyboardButton("فارسی", callback_data="lang_fa"),
+                InlineKeyboardButton("العربية", callback_data="lang_ar")
+            ]
+        ]
+
+        await update.message.reply_text(
+            welcome_msg,
+            reply_markup=get_main_menu_keyboard(lang)
+        )
+
+        await update.message.reply_text(
+            get_text("language_select", lang),
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     else:
-        await update.message.reply_text("注册失败，请稍后重试。")
+        await update.message.reply_text(get_text("registration_failed", lang))
+
+
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
+    """处理 /language 命令"""
+    if await reject_group_command(update):
+        return
+
+    user_id = update.effective_user.id
+    if not db.user_exists(user_id):
+        await update.message.reply_text(get_text("not_registered", "en"))
+        return
+
+    lang = db.get_user_language(user_id)
+
+    keyboard = [
+        [
+            InlineKeyboardButton("English", callback_data="lang_en"),
+            InlineKeyboardButton("简体中文", callback_data="lang_zh")
+        ],
+        [
+            InlineKeyboardButton("فارسی", callback_data="lang_fa"),
+            InlineKeyboardButton("العربية", callback_data="lang_ar")
+        ]
+    ]
+
+    await update.message.reply_text(
+        get_text("language_select", lang),
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
+    """处理语言选择回调"""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if not data.startswith("lang_"):
+        return
+
+    lang_code = data.split("_")[1]
+    user_id = update.effective_user.id
+
+    if lang_code in LANGUAGES:
+        db.set_user_language(user_id, lang_code)
+
+        # 更新界面语言
+        success_msg = get_text("language_set", lang_code)
+        await query.edit_message_text(success_msg)
+
+        # 发送新菜单
+        await query.message.reply_text(
+            get_text("menu_verify", lang_code), # Just a dummy message to show keyboard
+            reply_markup=get_main_menu_keyboard(lang_code)
+        )
 
 
 async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
@@ -59,7 +157,10 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: 
     if await reject_group_command(update):
         return
 
-    await update.message.reply_text(get_about_message())
+    user_id = update.effective_user.id
+    lang = db.get_user_language(user_id) if db.user_exists(user_id) else "en"
+
+    await update.message.reply_text(get_about_message(lang), reply_markup=get_main_menu_keyboard(lang))
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
@@ -68,8 +169,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: D
         return
 
     user_id = update.effective_user.id
+    lang = db.get_user_language(user_id) if db.user_exists(user_id) else "en"
     is_admin = user_id == ADMIN_USER_ID
-    await update.message.reply_text(get_help_message(is_admin))
+
+    await update.message.reply_text(get_help_message(is_admin, lang), reply_markup=get_main_menu_keyboard(lang))
 
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
@@ -78,59 +181,48 @@ async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db
         return
 
     user_id = update.effective_user.id
+    lang = db.get_user_language(user_id) if db.user_exists(user_id) else "en"
 
     if db.is_user_blocked(user_id):
-        await update.message.reply_text("您已被拉黑，无法使用此功能。")
+        await update.message.reply_text(get_text("blocked_user", lang))
         return
 
     user = db.get_user(user_id)
     if not user:
-        await update.message.reply_text("请先使用 /start 注册。")
+        await update.message.reply_text(get_text("not_registered", lang))
         return
 
     await update.message.reply_text(
-        f"💰 积分余额\n\n当前积分：{user['balance']} 分"
+        get_text("current_balance", lang, balance=user['balance']),
+        reply_markup=get_main_menu_keyboard(lang)
     )
 
 
 async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
-    """处理 /qd 签到命令 - 临时禁用"""
+    """处理 /qd 签到命令"""
     user_id = update.effective_user.id
+    lang = db.get_user_language(user_id) if db.user_exists(user_id) else "en"
 
-    # 临时禁用签到功能（修复bug中）
-    # await update.message.reply_text(
-    #     "⚠️ 签到功能临时维护中\n\n"
-    #     "由于发现bug，签到功能暂时关闭，正在修复。\n"
-    #     "预计很快恢复，给您带来不便敬请谅解。\n\n"
-    #     "💡 您可以通过以下方式获取积分：\n"
-    #     "• 邀请好友 /invite（+2积分）\n"
-    #     "• 使用卡密 /use <卡密>"
-    # )
-    # return
-    
-    # ===== 以下代码已禁用 =====
     if db.is_user_blocked(user_id):
-        await update.message.reply_text("您已被拉黑，无法使用此功能。")
+        await update.message.reply_text(get_text("blocked_user", lang))
         return
 
     if not db.user_exists(user_id):
-        await update.message.reply_text("请先使用 /start 注册。")
+        await update.message.reply_text(get_text("not_registered", lang))
         return
 
-    # 第1层检查：在命令处理器层面检查
     if not db.can_checkin(user_id):
-        await update.message.reply_text("❌ 今天已经签到过了，明天再来吧。")
+        await update.message.reply_text(get_text("checkin_already", lang), reply_markup=get_main_menu_keyboard(lang))
         return
 
-    # 第2层检查：在数据库层面执行（SQL原子操作）
     if db.checkin(user_id):
         user = db.get_user(user_id)
         await update.message.reply_text(
-            f"✅ 签到成功！\n获得积分：+1\n当前积分：{user['balance']} 分"
+            get_text("checkin_success", lang, balance=user['balance']),
+            reply_markup=get_main_menu_keyboard(lang)
         )
     else:
-        # 如果数据库层面返回False，说明今天已签到（双重保险）
-        await update.message.reply_text("❌ 今天已经签到过了，明天再来吧。")
+        await update.message.reply_text(get_text("checkin_already", lang), reply_markup=get_main_menu_keyboard(lang))
 
 
 async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
@@ -139,21 +231,22 @@ async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db:
         return
 
     user_id = update.effective_user.id
+    lang = db.get_user_language(user_id) if db.user_exists(user_id) else "en"
 
     if db.is_user_blocked(user_id):
-        await update.message.reply_text("您已被拉黑，无法使用此功能。")
+        await update.message.reply_text(get_text("blocked_user", lang))
         return
 
     if not db.user_exists(user_id):
-        await update.message.reply_text("请先使用 /start 注册。")
+        await update.message.reply_text(get_text("not_registered", lang))
         return
 
     bot_username = context.bot.username
     invite_link = f"https://t.me/{bot_username}?start={user_id}"
 
     await update.message.reply_text(
-        f"🎁 您的专属邀请链接：\n{invite_link}\n\n"
-        "每邀请 1 位成功注册，您将获得 2 积分。"
+        get_text("invite_message", lang, invite_link=invite_link),
+        reply_markup=get_main_menu_keyboard(lang)
     )
 
 
@@ -163,34 +256,65 @@ async def use_command(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Da
         return
 
     user_id = update.effective_user.id
+    lang = db.get_user_language(user_id) if db.user_exists(user_id) else "en"
 
     if db.is_user_blocked(user_id):
-        await update.message.reply_text("您已被拉黑，无法使用此功能。")
+        await update.message.reply_text(get_text("blocked_user", lang))
         return
 
     if not db.user_exists(user_id):
-        await update.message.reply_text("请先使用 /start 注册。")
+        await update.message.reply_text(get_text("not_registered", lang))
         return
 
     if not context.args:
-        await update.message.reply_text(
-            "使用方法: /use <卡密>\n\n示例: /use wandouyu"
-        )
+        await update.message.reply_text(get_text("use_key_usage", lang))
         return
 
     key_code = context.args[0].strip()
     result = db.use_card_key(key_code, user_id)
 
     if result is None:
-        await update.message.reply_text("卡密不存在，请检查后重试。")
+        await update.message.reply_text(get_text("key_not_found", lang))
     elif result == -1:
-        await update.message.reply_text("该卡密已达到使用次数上限。")
+        await update.message.reply_text(get_text("key_limit_reached", lang))
     elif result == -2:
-        await update.message.reply_text("该卡密已过期。")
+        await update.message.reply_text(get_text("key_expired", lang))
     elif result == -3:
-        await update.message.reply_text("您已经使用过该卡密。")
+        await update.message.reply_text(get_text("key_already_used", lang))
     else:
         user = db.get_user(user_id)
         await update.message.reply_text(
-            f"卡密使用成功！\n获得积分：{result}\n当前积分：{user['balance']}"
+            get_text("key_success", lang, amount=result, balance=user['balance']),
+            reply_markup=get_main_menu_keyboard(lang)
         )
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, db: Database):
+    """处理文本消息（菜单点击）"""
+    if await reject_group_command(update):
+        return
+
+    user_id = update.effective_user.id
+    lang = db.get_user_language(user_id) if db.user_exists(user_id) else "en"
+    text = update.message.text
+
+    # 简单的文本匹配
+    if text == get_text("menu_verify", lang):
+        # List all verification services
+        msg = get_text("help_verify_commands", lang, cost=1, help_url="") # We reuse help_verify_commands
+        await update.message.reply_text(msg, disable_web_page_preview=True)
+
+    elif text == get_text("menu_balance", lang):
+        await balance_command(update, context, db)
+
+    elif text == get_text("menu_checkin", lang):
+        await checkin_command(update, context, db)
+
+    elif text == get_text("menu_invite", lang):
+        await invite_command(update, context, db)
+
+    elif text == get_text("menu_language", lang):
+        await language_command(update, context, db)
+
+    elif text == get_text("menu_help", lang):
+        await help_command(update, context, db)

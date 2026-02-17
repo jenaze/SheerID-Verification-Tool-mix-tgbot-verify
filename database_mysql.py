@@ -39,6 +39,17 @@ class MySQLDatabase:
         """获取数据库连接"""
         return pymysql.connect(**self.config)
 
+    def ensure_language_column(self, cursor):
+        """Ensure language column exists in users table"""
+        try:
+            cursor.execute("SHOW COLUMNS FROM users LIKE 'language'")
+            result = cursor.fetchone()
+            if not result:
+                logger.info("Adding language column to users table")
+                cursor.execute("ALTER TABLE users ADD COLUMN language VARCHAR(10) DEFAULT 'en'")
+        except Exception as e:
+            logger.error(f"Failed to check/add language column: {e}")
+
     def init_database(self):
         """初始化数据库表结构"""
         conn = self.get_connection()
@@ -57,11 +68,15 @@ class MySQLDatabase:
                     invited_by BIGINT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     last_checkin DATETIME NULL,
+                    language VARCHAR(10) DEFAULT 'en',
                     INDEX idx_username (username),
                     INDEX idx_invited_by (invited_by)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+
+            # Check and add language column if it doesn't exist
+            self.ensure_language_column(cursor)
 
             # 邀请记录表
             cursor.execute(
@@ -138,6 +153,44 @@ class MySQLDatabase:
             logger.error(f"初始化数据库失败: {e}")
             conn.rollback()
             raise
+        finally:
+            cursor.close()
+            conn.close()
+
+    def get_user_language(self, user_id: int) -> str:
+        """Get user's preferred language"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("SELECT language FROM users WHERE user_id = %s", (user_id,))
+            result = cursor.fetchone()
+            if result and result[0]:
+                return result[0]
+            return 'en'
+        except Exception as e:
+            logger.error(f"Failed to get user language: {e}")
+            return 'en'
+        finally:
+            cursor.close()
+            conn.close()
+
+    def set_user_language(self, user_id: int, language: str) -> bool:
+        """Set user's preferred language"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                "UPDATE users SET language = %s WHERE user_id = %s",
+                (language, user_id)
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set user language: {e}")
+            conn.rollback()
+            return False
         finally:
             cursor.close()
             conn.close()
