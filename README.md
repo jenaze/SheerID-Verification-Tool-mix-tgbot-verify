@@ -79,8 +79,8 @@ This is a Python-based Telegram bot that can automatically complete SheerID stud
 ### 1. Clone the Project
 
 ```bash
-git clone https://github.com/PastKing/tgbot-verify.git
-cd tgbot-verify
+git clone https://github.com/jenaze/SheerID-Verification-Tool-mix-tgbot-verify.git
+cd SheerID-Verification-Tool-mix-tgbot-verify
 ```
 
 ### 2. Install Dependencies
