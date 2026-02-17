@@ -1,3 +1,374 @@
+# SheerID Auto Verification Telegram Bot
+
+![Stars](https://img.shields.io/github/stars/PastKing/tgbot-verify?style=social)
+![Forks](https://img.shields.io/github/forks/PastKing/tgbot-verify?style=social)
+![Issues](https://img.shields.io/github/issues/PastKing/tgbot-verify)
+![License](https://img.shields.io/github/license/PastKing/tgbot-verify)
+
+> 🤖 A Telegram bot that automatically completes SheerID student/teacher verification.
+>
+> Improved based on the legacy code from [@auto_sheerid_bot](https://t.me/auto_sheerid_bot) by GGBond.
+
+---
+
+## 📋 Project Overview
+
+This is a Python-based Telegram bot that can automatically complete SheerID student/teacher identity verification across multiple platforms. The bot generates identity info, creates verification documents, and submits them to the SheerID platform, greatly simplifying the verification process.
+
+> **⚠️ Important Notes**:
+>
+> - Before using services such as **Gemini One Pro**, **ChatGPT Teacher K12**, **Spotify Student**, and **YouTube Premium Student**, you must update verification data like `programId` in each module config file. See the "Must Read Before Use" section below.
+> - This project also provides implementation ideas and API documentation for **ChatGPT Military Verification**. For details, check [`military/README.md`](military/README.md), and integrate it yourself if needed.
+
+### 🎯 Supported Verification Services
+
+| Command | Service | Type | Status | Notes |
+|------|------|------|------|------|
+| `/verify` | Gemini One Pro | Teacher Verification | ✅ Complete | Google AI Studio education discount |
+| `/verify2` | ChatGPT Teacher K12 | Teacher Verification | ✅ Complete | OpenAI ChatGPT education discount |
+| `/verify3` | Spotify Student | Student Verification | ✅ Complete | Spotify student subscription discount |
+| `/verify4` | Bolt.new Teacher | Teacher Verification | ✅ Complete | Bolt.new education discount (auto code fetch) |
+| `/verify5` | YouTube Premium Student | Student Verification | ⚠️ Partial | YouTube Premium student discount (see notes below) |
+
+> **⚠️ Special Note for YouTube Verification**:
+>
+> The YouTube verification feature is currently partial. Please read [`youtube/HELP.MD`](youtube/HELP.MD) carefully before use.
+>
+> **Main differences**:
+> - The original YouTube link format differs from other services.
+> - You need to manually extract `programId` and `verificationId` from browser network logs.
+> - Then manually build a standard SheerID link format.
+>
+> **Steps**:
+> 1. Visit the YouTube Premium student verification page.
+> 2. Open browser dev tools (F12) -> Network tab.
+> 3. Start verification and search for `https://services.sheerid.com/rest/v2/verification/`.
+> 4. Get `programId` from the request payload, and `verificationId` from the response.
+> 5. Manually build the URL: `https://services.sheerid.com/verify/{programId}/?verificationId={verificationId}`
+> 6. Submit this URL using the `/verify5` command.
+
+> **💡 ChatGPT Military Verification Idea**:
+>
+> This project provides implementation ideas and API docs for ChatGPT military SheerID verification. The military flow is different from regular student/teacher verification: you must call `collectMilitaryStatus` first to set military status, then submit personal info forms. See [`military/README.md`](military/README.md) for full details.
+
+### ✨ Core Features
+
+- 🚀 **Automated Flow**: One-command flow for info generation, document creation, and verification submission.
+- 🎨 **Smart Generation**: Automatically generates student/teacher ID PNG images.
+- 💰 **Credits System**: Multiple earning methods like daily check-in, invites, and key redemption.
+- 🔐 **Secure & Reliable**: Uses MySQL and supports environment-variable configuration.
+- ⚡ **Concurrency Control**: Manages concurrent requests for better stability.
+- 👥 **Admin Tools**: Complete user and credit management functions.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Language**: Python 3.11+
+- **Bot Framework**: python-telegram-bot 20.0+
+- **Database**: MySQL 5.7+
+- **Browser Automation**: Playwright
+- **HTTP Client**: httpx
+- **Image Processing**: Pillow, reportlab, xhtml2pdf
+- **Environment Management**: python-dotenv
+
+---
+
+## 🚀 Quick Start
+
+### 1. Clone the Project
+
+```bash
+git clone https://github.com/PastKing/tgbot-verify.git
+cd tgbot-verify
+```
+
+### 2. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+### 3. Configure Environment Variables
+
+Copy `env.example` to `.env` and fill in your values:
+
+```env
+# Telegram Bot configuration
+BOT_TOKEN=your_bot_token_here
+CHANNEL_USERNAME=your_channel
+CHANNEL_URL=https://t.me/your_channel
+ADMIN_USER_ID=your_admin_id
+
+# MySQL database configuration
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=your_password
+MYSQL_DATABASE=tgbot_verify
+```
+
+### 4. Start the Bot
+
+```bash
+python bot.py
+```
+
+---
+
+## 🐳 Docker Deployment
+
+### Docker Compose (Recommended)
+
+```bash
+# 1. Update .env file
+cp env.example .env
+nano .env
+
+# 2. Start services
+docker-compose up -d
+
+# 3. View logs
+docker-compose logs -f
+```
+
+### Manual Docker Deployment
+
+```bash
+# Build image
+docker build -t tgbot-verify .
+
+# Run container
+docker run -d \
+  --name tgbot-verify \
+  --env-file .env \
+  -v $(pwd)/logs:/app/logs \
+  tgbot-verify
+```
+
+---
+
+## 📖 Usage Guide
+
+### User Commands
+
+```bash
+/start              # Start using (register)
+/about              # Learn bot features
+/balance            # Check credits balance
+/qd                 # Daily check-in (+1 credit)
+/invite             # Generate invite link (+2 credits/user)
+/use <key>          # Redeem key for credits
+/verify <link>      # Gemini One Pro verification
+/verify2 <link>     # ChatGPT Teacher K12 verification
+/verify3 <link>     # Spotify Student verification
+/verify4 <link>     # Bolt.new Teacher verification
+/verify5 <link>     # YouTube Premium Student verification
+/getV4Code <id>     # Get Bolt.new verification code
+/help               # Show help
+```
+
+### Admin Commands
+
+```bash
+/addbalance <user_id> <credits>          # Add credits to user
+/block <user_id>                         # Blacklist user
+/white <user_id>                         # Remove from blacklist
+/blacklist                               # View blacklist
+/genkey <key> <credits> [times] [days]   # Generate redeem key
+/listkeys                                # List keys
+/broadcast <text>                        # Broadcast message
+```
+
+### Verification Flow
+
+1. **Get a verification link**
+   - Open the target service verification page.
+   - Start the verification process.
+   - Copy the full URL from the browser address bar (including `verificationId`).
+
+2. **Submit verification request**
+   ```
+   /verify3 https://services.sheerid.com/verify/xxx/?verificationId=yyy
+   ```
+
+3. **Wait for processing**
+   - Bot generates identity info automatically.
+   - Creates student/teacher ID images.
+   - Submits data to SheerID platform.
+
+4. **Receive result**
+   - Review usually completes within minutes.
+   - On success, a redirect link is returned.
+
+---
+
+## 📁 Project Structure
+
+```
+tgbot-verify/
+├── bot.py                  # Main bot entry
+├── config.py               # Global configuration
+├── database_mysql.py       # MySQL database manager
+├── .env                    # Environment variables (create manually)
+├── env.example             # Env template
+├── requirements.txt        # Python dependencies
+├── Dockerfile              # Docker image build file
+├── docker-compose.yml      # Docker Compose configuration
+├── handlers/               # Command handlers
+│   ├── user_commands.py    # User commands
+│   ├── admin_commands.py   # Admin commands
+│   └── verify_commands.py  # Verification commands
+├── one/                    # Gemini One Pro module
+├── k12/                    # ChatGPT K12 module
+├── spotify/                # Spotify Student module
+├── youtube/                # YouTube Premium module
+├── Boltnew/                # Bolt.new module
+├── military/               # ChatGPT military verification docs
+└── utils/                  # Utility functions
+    ├── messages.py         # Message templates
+    ├── concurrency.py      # Concurrency control
+    └── checks.py           # Permission checks
+```
+
+---
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Required | Description | Default |
+|--------|------|------|--------|
+| `BOT_TOKEN` | ✅ | Telegram Bot Token | - |
+| `CHANNEL_USERNAME` | ❌ | Channel username | pk_oa |
+| `CHANNEL_URL` | ❌ | Channel URL | https://t.me/pk_oa |
+| `ADMIN_USER_ID` | ✅ | Admin Telegram ID | - |
+| `MYSQL_HOST` | ✅ | MySQL host | localhost |
+| `MYSQL_PORT` | ❌ | MySQL port | 3306 |
+| `MYSQL_USER` | ✅ | MySQL username | - |
+| `MYSQL_PASSWORD` | ✅ | MySQL password | - |
+| `MYSQL_DATABASE` | ✅ | Database name | tgbot_verify |
+
+### Credits Settings
+
+You can customize credit rules in `config.py`:
+
+```python
+VERIFY_COST = 1        # Credits consumed per verification
+CHECKIN_REWARD = 1     # Daily check-in reward
+INVITE_REWARD = 2      # Invite reward
+REGISTER_REWARD = 1    # Registration reward
+```
+
+---
+
+## ⚠️ Important Information
+
+### 🔴 Must Read Before Use
+
+**Before running the bot, you must check and update verification configs for each module.**
+
+Because SheerID `programId` values may change periodically, you **must** update verification data in config files for the following services before use:
+
+- `one/config.py` - **Gemini One Pro** (update `PROGRAM_ID`)
+- `k12/config.py` - **ChatGPT Teacher K12** (update `PROGRAM_ID`)
+- `spotify/config.py` - **Spotify Student** (update `PROGRAM_ID`)
+- `youtube/config.py` - **YouTube Premium Student** (update `PROGRAM_ID`)
+- `Boltnew/config.py` - Bolt.new Teacher (recommended to verify `PROGRAM_ID`)
+
+**How to get the latest `programId`**:
+1. Visit the corresponding verification page.
+2. Open browser dev tools (F12) -> Network tab.
+3. Start the verification process.
+4. Find request: `https://services.sheerid.com/rest/v2/verification/`
+5. Extract `programId` from URL or request payload.
+6. Update the module `config.py`.
+
+> **Tip**: If verification keeps failing, your `programId` is likely expired. Update it using the steps above.
+
+---
+
+## 🔗 Related Links
+
+- 📺 **Telegram Channel**: https://t.me/pk_oa
+- 🐛 **Issue Tracker**: [GitHub Issues](https://github.com/PastKing/tgbot-verify/issues)
+- 📖 **Deployment Guide**: [DEPLOY.md](DEPLOY.md)
+
+---
+
+## 🤝 Secondary Development
+
+Contributions and secondary development are welcome, but please follow these rules:
+
+1. **Keep original author information**
+   - Keep the original repository URL in code/docs.
+   - Mention that your version is based on this project.
+
+2. **Open-source license**
+   - This project is under MIT license.
+   - Secondary development projects must also be open source.
+
+3. **Commercial usage**
+   - Free for personal use.
+   - For commercial use, optimize and take responsibility yourself.
+   - No technical support or warranty is provided.
+
+---
+
+## 📜 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+```
+MIT License
+
+Copyright (c) 2025 PastKing
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction...
+```
+
+---
+
+## 🙏 Acknowledgements
+
+- Thanks to [@auto_sheerid_bot](https://t.me/auto_sheerid_bot) GGBond for the legacy code foundation.
+- Thanks to all developers who contributed to this project.
+- Thanks to the SheerID platform for providing verification services.
+
+---
+
+## 📊 Project Stats
+
+[![Star History Chart](https://api.star-history.com/svg?repos=PastKing/tgbot-verify&type=Date)](https://star-history.com/#PastKing/tgbot-verify&Date)
+
+---
+
+## 📝 Changelog
+
+### v2.0.0 (2025-01-12)
+
+- ✨ Added Spotify Student and YouTube Premium Student verification (YouTube is partial; refer to `youtube/HELP.MD`)
+- 🚀 Improved concurrency control and performance
+- 📝 Improved documentation and deployment guide
+- 🐛 Fixed known bugs
+
+### v1.0.0
+
+- 🎉 Initial release
+- ✅ Supports Gemini, ChatGPT, and Bolt.new verification
+
+---
+
+<p align="center">
+  <strong>⭐ If this project helps you, please give it a Star!</strong>
+</p>
+
+<p align="center">
+  Made with ❤️ by <a href="https://github.com/PastKing">PastKing</a>
+</p>
 # SheerID 自动认证 Telegram 机器人
 
 ![Stars](https://img.shields.io/github/stars/PastKing/tgbot-verify?style=social)
